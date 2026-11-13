@@ -1,6 +1,10 @@
 go-lab.rasc.ch {
 	encode zstd gzip
 
+	basic_auth {
+		import /etc/caddy/auth/go-lab.users
+	}
+
 	reverse_proxy 127.0.0.1:3002 {
 		transport http {
 			response_header_timeout 50s

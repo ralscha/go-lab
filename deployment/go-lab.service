@@ -17,6 +17,7 @@ Environment=HOST=127.0.0.1
 Environment=PORT=3002
 Environment=STATIC_ROOT=/opt/go-lab/current/frontend
 Environment=ALLOWED_ORIGINS=https://go-lab.rasc.ch
+Environment=TRUST_FORWARDED_FOR=true
 Environment=DOCKER_HOST=unix:///var/run/docker.sock
 Environment=DOCKER_CONFIG=/var/lib/go-lab/docker
 EnvironmentFile=/opt/go-lab/current/runner.env

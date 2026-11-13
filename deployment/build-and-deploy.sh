@@ -9,6 +9,7 @@ readonly SERVICE=go-lab.service
 readonly SERVICE_FILE=/etc/systemd/system/go-lab.service
 readonly CADDY_MAIN=/etc/caddy/Caddyfile
 readonly CADDY_SITE=/etc/caddy/sites/go-lab.caddy
+readonly CADDY_USERS=/etc/caddy/auth/go-lab.users
 readonly SITE=go-lab.rasc.ch
 
 work_dir=
@@ -89,6 +90,15 @@ cleanup() {
   exit "$status"
 }
 
+check_caddy_users() {
+  [[ -f "$CADDY_USERS" ]] || die "Create $CADDY_USERS with Basic Auth users first (see deployment/README.md)."
+  grep -Eq '^[[:space:]]*[^#[:space:]]+[[:space:]]+\$2[aby]\$' "$CADDY_USERS" || \
+    die "$CADDY_USERS must contain at least one 'username bcrypt-hash' line."
+  if id -u caddy >/dev/null 2>&1; then
+    runuser -u caddy -- test -r "$CADDY_USERS" || die "The caddy user cannot read $CADDY_USERS."
+  fi
+}
+
 caddy_has_site() {
   node - "$work_dir/caddy.json" "$SITE" <<'NODE'
 const fs = require('node:fs');
@@ -106,7 +116,8 @@ NODE
 [[ $EUID -eq 0 ]] || die 'Run this script as root (with the build tools available in PATH).'
 [[ -n "$REPO_URL" && -n "$BRANCH" ]] || die 'REPO_URL and BRANCH must not be empty.'
 for command_name in git node npm go docker systemctl systemd-analyze caddy curl \
-  install flock mktemp readlink ln mv cp cat rm chmod find getent groupadd useradd id basename date sleep; do
+  install flock mktemp readlink ln mv cp cat rm chmod find getent groupadd useradd id basename date sleep \
+  grep runuser; do
   command -v "$command_name" >/dev/null 2>&1 || die "Missing required command: $command_name"
 done
 
@@ -135,6 +146,7 @@ getent group docker >/dev/null || die 'The Docker installation must provide the 
 for config_file in "$SERVICE_FILE" "$CADDY_MAIN" "$CADDY_SITE"; do
   [[ ! -L "$config_file" || -e "$config_file" ]] || die "$config_file is a broken symlink."
 done
+check_caddy_users
 
 if [[ -s "$CADDY_MAIN" ]]; then
   caddy adapt --config "$CADDY_MAIN" --adapter caddyfile > "$work_dir/caddy.json"

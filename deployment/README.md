@@ -2,13 +2,12 @@
 
 This installs `git@github.com:ralscha/go-lab.git`, branch `main`, at **https://go-lab.rasc.ch** on a Linux server using systemd, Caddy, and Docker. It can coexist with rust-lab: go-lab uses its own service, release directory, runner images, Caddy site, and loopback port **3002**.
 
-| File                  | Purpose                                            |
-| --------------------- | -------------------------------------------------- |
-| `build-and-deploy.sh` | Clones, builds, activates, and verifies a release. |
-| `go-lab.service`      | Runs the Go backend as the `go-lab` system user.   |
-| `Caddyfile`           | HTTPS site and reverse proxy to `127.0.0.1:3002`.  |
+| File                  | Purpose                                                        |
+| --------------------- | -------------------------------------------------------------- |
+| `build-and-deploy.sh` | Clones, builds, activates, and verifies a release.             |
+| `go-lab.service`      | Runs the Go backend as the `go-lab` system user.               |
+| `Caddyfile`           | HTTPS site, Basic Auth, and reverse proxy to `127.0.0.1:3002`. |
 
-**Trust boundary:** This configuration does not provide authentication. The runner executes submitted code in containers that share the host kernel, and the backend's Docker access is effectively host-administrator access. Restrict access to trusted users, for example through a VPN or an independently configured access-controlled proxy. Do not treat this deployment as a sandbox for untrusted public users.
 
 ## Prerequisites
 
@@ -25,6 +24,19 @@ The script does not install these prerequisites. Point the `go-lab.rasc.ch` DNS 
 ```sh
 systemctl enable --now docker.service
 ```
+
+## Access credentials
+
+The site uses Caddy Basic Auth. Password hashes are kept only on the server in `/etc/caddy/auth/go-lab.users`, which the deployment script never overwrites. Create it before the first deployment; `caddy hash-password` prompts for the password:
+
+```sh
+install -d -m 0750 -o root -g caddy /etc/caddy/auth
+printf '%s %s\n' alice "$(caddy hash-password)" > /etc/caddy/auth/go-lab.users
+chown root:caddy /etc/caddy/auth/go-lab.users
+chmod 0640 /etc/caddy/auth/go-lab.users
+```
+
+Each line has the form `username bcrypt-hash`. Append lines for more users. To use the same accounts as rust-lab, make this file a symlink to `/etc/caddy/auth/rust-lab.users`. After editing the file outside a deployment, run `systemctl reload caddy.service`. The script refuses to deploy if the file is missing, has no user lines, or is unreadable by the `caddy` user.
 
 ## First installation
 
@@ -71,6 +83,7 @@ Each release retains its own runner image tag, so rollback uses the matching ima
 /var/lib/go-lab/                          systemd-managed runtime state
 /etc/systemd/system/go-lab.service
 /etc/caddy/sites/go-lab.caddy
+/etc/caddy/auth/go-lab.users              Basic Auth users (administrator-managed)
 ```
 
 ## Status and troubleshooting
@@ -86,7 +99,7 @@ cat /opt/go-lab/current/REVISION
 
 The deployment checks use local HTTP; separately verify DNS, certificate issuance, and the HTTPS site. If port 3002 is occupied, stop the other process before deploying.
 
-The backend rate limit is 30 runner requests per minute per connection-source IP. Behind Caddy, visitors share the loopback address and therefore share that limit; health checks are exempt. This deployment does not change that behavior.
+The backend rate limit is 30 runner requests per minute per client IP; health checks are exempt. The service sets `TRUST_FORWARDED_FOR=true`, so for connections from loopback the backend uses the rightmost `X-Forwarded-For` entry, which Caddy sets to the real client address. Other connections and other entries in the header are ignored, so clients cannot choose their rate-limit identity.
 
 For manual Caddy changes, validate before reloading:
 

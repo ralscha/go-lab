@@ -124,6 +124,49 @@ func TestLimitsAndUnavailableRunner(t *testing.T) {
 		t.Fatalf("body limit: %d", w.Code)
 	}
 }
+func TestRateLimitUsesForwardedClientFromLoopbackProxy(t *testing.T) {
+	send := func(a *app, remote, forwarded string) int {
+		r := httptest.NewRequest("POST", "/api/execute", strings.NewReader(`{"code":"x"}`))
+		r.Header.Set("Content-Type", "application/json")
+		r.RemoteAddr = remote
+		if forwarded != "" {
+			r.Header.Set("X-Forwarded-For", forwarded)
+		}
+		w := httptest.NewRecorder()
+		a.ServeHTTP(w, r)
+		return w.Code
+	}
+	exhaust := func(a *app, remote, forwarded string) {
+		for range 30 {
+			send(a, remote, forwarded)
+		}
+		if code := send(a, remote, forwarded); code != 429 {
+			t.Fatalf("expected limit for %s/%s: %d", remote, forwarded, code)
+		}
+	}
+
+	a := testApp(&fakeRunner{}, t.TempDir())
+	a.trustForwarded = true
+	exhaust(a, "127.0.0.1:5000", "203.0.113.1")
+	if code := send(a, "127.0.0.1:5000", "203.0.113.2"); code != 200 {
+		t.Fatalf("separate client shared the limit: %d", code)
+	}
+	// A spoofed leftmost entry must not let the client escape its own limit.
+	if code := send(a, "127.0.0.1:5000", "198.51.100.9, 203.0.113.1"); code != 429 {
+		t.Fatalf("spoofed entry bypassed limit: %d", code)
+	}
+	// Non-loopback peers cannot choose their address with the header.
+	exhaust(a, "192.0.2.5:5000", "203.0.113.3")
+	if code := send(a, "192.0.2.5:5000", "203.0.113.4"); code != 429 {
+		t.Fatalf("untrusted header honored: %d", code)
+	}
+
+	disabled := testApp(&fakeRunner{}, t.TempDir())
+	exhaust(disabled, "127.0.0.1:5000", "203.0.113.1")
+	if code := send(disabled, "127.0.0.1:5000", "203.0.113.2"); code != 429 {
+		t.Fatalf("header honored while disabled: %d", code)
+	}
+}
 func TestStaticAndUnknownAPI(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("Go course"), 0600); err != nil {

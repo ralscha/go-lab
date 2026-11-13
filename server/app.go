@@ -45,10 +45,13 @@ type app struct {
 	mu      sync.Mutex
 	rates   map[string]rate
 	origins map[string]bool
+	// trustForwarded uses X-Forwarded-For from a loopback reverse proxy such as Caddy.
+	trustForwarded bool
 }
 
 func newApp(r runner, root string) *app {
-	a := &app{runner: r, root: root, slots: make(chan struct{}, 4), rates: map[string]rate{}, origins: map[string]bool{}}
+	a := &app{runner: r, root: root, slots: make(chan struct{}, 4), rates: map[string]rate{}, origins: map[string]bool{},
+		trustForwarded: env("TRUST_FORWARDED_FOR", "false") == "true"}
 	for origin := range strings.SplitSeq(env("ALLOWED_ORIGINS", "http://localhost:4201,http://127.0.0.1:4201"), ",") {
 		a.origins[strings.TrimSpace(origin)] = true
 	}
@@ -94,11 +97,27 @@ func (a *app) allowedHost(host string) bool {
 	}
 	return false
 }
-func (a *app) limited(r *http.Request) bool {
+func (a *app) clientAddress(r *http.Request) string {
 	address, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		address = r.RemoteAddr
 	}
+	if ip := net.ParseIP(address); !a.trustForwarded || ip == nil || !ip.IsLoopback() {
+		return address
+	}
+	// The proxy appends the client address, so only the rightmost entry is trustworthy.
+	values := r.Header.Values("X-Forwarded-For")
+	if len(values) == 0 {
+		return address
+	}
+	entries := strings.Split(values[len(values)-1], ",")
+	if forwarded := net.ParseIP(strings.TrimSpace(entries[len(entries)-1])); forwarded != nil {
+		return forwarded.String()
+	}
+	return address
+}
+func (a *app) limited(r *http.Request) bool {
+	address := a.clientAddress(r)
 	now := time.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
