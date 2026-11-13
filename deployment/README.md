@@ -8,7 +8,6 @@ This installs `git@github.com:ralscha/go-lab.git`, branch `main`, at **https://g
 | `go-lab.service`      | Runs the Go backend as the `go-lab` system user.               |
 | `Caddyfile`           | HTTPS site, Basic Auth, and reverse proxy to `127.0.0.1:3002`. |
 
-
 ## Prerequisites
 
 Use a Linux server with systemd and these tools in the **root shell's PATH**:
