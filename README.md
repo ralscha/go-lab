@@ -27,6 +27,10 @@ npm run serve
 
 Open **http://127.0.0.1:3002**. `build` creates `dist/go-lab/browser` and `bin/server` (`bin/server.exe` on Windows). The compiled binary can be launched directly from the repository root. Do not run development and production servers on port 3002 simultaneously.
 
+## Server deployment
+
+For Linux installation and updates with systemd, Caddy, and Docker, see [deployment/README.md](deployment/README.md). The provided configuration targets `go-lab.rasc.ch`.
+
 ## Learn and experiment
 
 - Search chapters, titles, summaries, and tags. Use `/` to focus search.

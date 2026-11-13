@@ -1,0 +1,35 @@
+[Unit]
+Description=Go Lab course and local Go runner
+Wants=network-online.target
+Requires=docker.service
+After=network-online.target docker.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=go-lab
+Group=go-lab
+SupplementaryGroups=docker
+WorkingDirectory=/opt/go-lab/current
+ExecStart=/opt/go-lab/current/bin/go-lab-server
+Environment=HOST=127.0.0.1
+Environment=PORT=3002
+Environment=STATIC_ROOT=/opt/go-lab/current/frontend
+Environment=ALLOWED_ORIGINS=https://go-lab.rasc.ch
+Environment=DOCKER_HOST=unix:///var/run/docker.sock
+Environment=DOCKER_CONFIG=/var/lib/go-lab/docker
+EnvironmentFile=/opt/go-lab/current/runner.env
+StateDirectory=go-lab
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=60s
+KillSignal=SIGTERM
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target
