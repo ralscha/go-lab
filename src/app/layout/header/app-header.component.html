@@ -1,0 +1,38 @@
+<header class="topbar">
+  <button class="brand" (click)="vm.navigate('overview')" aria-label="go-lab home">
+    <span class="brand-mark">G<span>✳</span></span
+    ><span>go<span class="brand-light">-lab</span></span>
+  </button>
+  <nav class="topnav" aria-label="Main navigation">
+    <button
+      [class.active]="vm.view() === 'overview' || vm.view() === 'lesson'"
+      (click)="vm.navigate('overview')"
+    >
+      The course
+    </button>
+    <button [class.active]="vm.view() === 'playground'" (click)="vm.navigate('playground')">
+      Playground <span>↗</span>
+    </button>
+    <button [class.active]="vm.view() === 'reference'" (click)="vm.navigate('reference')">
+      Field notes
+    </button>
+  </nav>
+  <div class="header-right">
+    <span class="version" [title]="vm.compilerDetail()"><i></i>{{ vm.compilerVersion() }}</span
+    ><a
+      class="github-link"
+      href="https://go.dev/doc/"
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Open the official Go documentation"
+      >Go documentation ↗</a
+    ><button
+      class="menu-button"
+      (click)="vm.mobileMenu.set(!vm.mobileMenu())"
+      [attr.aria-expanded]="vm.mobileMenu()"
+      aria-label="Toggle course menu"
+    >
+      ☰
+    </button>
+  </div>
+</header>

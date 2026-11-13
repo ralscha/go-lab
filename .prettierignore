@@ -1,0 +1,12 @@
+node_modules
+dist
+.angular
+.artifacts
+bin
+test-results
+playwright-report
+package-lock.json
+*.go
+go.mod
+go.sum
+runner

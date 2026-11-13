@@ -1,0 +1,61 @@
+<aside class="playground-panel" aria-label="Interactive Go playground">
+  <div class="playground-title">
+    <div>
+      <strong>{{
+        vm.view() === 'playground'
+          ? 'Go editor'
+          : vm.editorTab() === 'exercise'
+            ? 'Exercise code'
+            : 'Example code'
+      }}</strong>
+    </div>
+  </div>
+  <div class="editor-topline">
+    <span
+      ><span class="file-icon">G</span>
+      {{ vm.runMode === 'test' ? 'main_test.go' : 'main.go' }}</span
+    >
+    <div>
+      <button (click)="vm.formatCode()" [disabled]="vm.busy() || vm.formatting()">
+        {{ vm.formatting() ? 'Formatting…' : 'Format' }}</button><button
+        (click)="vm.resetCode()"
+        [disabled]="vm.busy() || vm.formatting()"
+        title="Restore the original code"
+      >
+        Reset</button
+      ><button
+        (click)="vm.download()"
+        [attr.aria-label]="vm.runMode === 'test' ? 'Download main_test.go' : 'Download main.go'"
+        title="Download source"
+      >
+        ↓
+      </button>
+    </div>
+  </div>
+  <code-editor [code]="vm.code()" (codeChange)="vm.editCode($event)"></code-editor>
+  <div class="runner-controls">
+    <label
+      >Mode<select [(ngModel)]="vm.runMode" [disabled]="vm.busy()">
+        <option value="run">Run</option>
+        <option value="test">Test</option>
+      </select></label
+    ><label
+      >Build<select [(ngModel)]="vm.optimization" [disabled]="vm.busy()">
+        <option value="default">Default</option>
+        <option value="race">Race detector</option>
+      </select></label
+    >
+  </div>
+  <div class="run-bar">
+    <span id="editor-help">Ctrl / ⌘ + Enter to run<br />Esc, then Tab to leave editor</span
+    ><button class="run-button" (click)="vm.run()" [disabled]="vm.busy() || vm.formatting()">
+      <span>{{ vm.busy() ? '◌' : '▷' }}</span>
+      {{ vm.busy() ? 'Running…' : vm.runMode === 'test' ? 'Run tests' : 'Run code' }}
+    </button>
+  </div>
+  <app-runner-output />
+  <div class="playground-footnote">
+    <span class="status-dot"></span
+    ><span>Runs locally without network access. Drafts are saved in this browser.</span>
+  </div>
+</aside>

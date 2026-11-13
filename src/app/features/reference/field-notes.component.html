@@ -1,0 +1,98 @@
+<div class="reference-page">
+  <div class="page-heading">
+    <span class="eyebrow">Keep this close</span>
+    <h1>Go field notes</h1>
+    <p>Commands, mental models, and official references.</p>
+  </div>
+  <div class="reference-grid">
+    <section class="reference-card">
+      <h2>Your local workflow</h2>
+      <dl class="command-list">
+        <dt>go version</dt>
+        <dd>Check the selected compiler; this course targets 1.27.4.</dd>
+        <dt>go mod init example.com/hello</dt>
+        <dd>Create a module in a new project directory.</dd>
+        <dt>go run .</dt>
+        <dd>Compile and run the current command.</dd>
+        <dt>go build ./...</dt>
+        <dd>Compile all packages in the module.</dd>
+        <dt>gofmt -w .</dt>
+        <dd>Format Go source consistently.</dd>
+        <dt>go test ./...</dt>
+        <dd>Run unit tests, examples, and fuzz seeds.</dd>
+        <dt>go test -race ./...</dt>
+        <dd>Check exercised paths for data races.</dd>
+        <dt>go vet ./...</dt>
+        <dd>Inspect suspicious constructs.</dd>
+        <dt>go doc io.Reader</dt>
+        <dd>Read an API contract from the terminal.</dd>
+        <dt>go mod tidy</dt>
+        <dd>Reconcile module requirements with imports.</dd>
+      </dl>
+    </section>
+    <section class="reference-card">
+      <h2>Semantics to remember</h2>
+      <ul class="reference-list">
+        <li>
+          Arguments are passed by value. Pointers, slices, and maps can still share underlying data.
+        </li>
+        <li>Keep the slice returned by append. Clone when independent storage is required.</li>
+        <li>A nil interface differs from an interface holding a typed nil pointer.</li>
+        <li>Check errors. Use %w to wrap a cause and errors.Is / errors.As to inspect it.</li>
+        <li>Give every goroutine a way to finish. Cancellation is cooperative.</li>
+        <li>The sending lifecycle owns channel closure. Join senders before closing results.</li>
+        <li>
+          Strings contain bytes; runes represent code points, not necessarily visible characters.
+        </li>
+      </ul>
+    </section>
+    <section class="reference-card">
+      <h2>Official documentation</h2>
+      <div class="resource-links">
+        <a href="https://go.dev/doc/" target="_blank" rel="noopener noreferrer"
+          ><strong>Go documentation ↗</strong
+          ><span>Tutorials, modules, tooling, and language guides.</span></a
+        >
+        <a href="https://go.dev/ref/spec" target="_blank" rel="noopener noreferrer"
+          ><strong>Language specification ↗</strong
+          ><span>Precise language rules and type semantics.</span></a
+        >
+        <a href="https://go.dev/doc/effective_go" target="_blank" rel="noopener noreferrer"
+          ><strong>Effective Go ↗</strong
+          ><span
+            >Core idioms. Pair this older guide with current module and generics
+            documentation.</span
+          ></a
+        >
+        <a href="https://pkg.go.dev/std" target="_blank" rel="noopener noreferrer"
+          ><strong>Standard library ↗</strong
+          ><span>Package contracts, examples, and source.</span></a
+        >
+        <a href="https://go.dev/ref/mem" target="_blank" rel="noopener noreferrer"
+          ><strong>Memory model ↗</strong
+          ><span>Synchronization and visibility between goroutines.</span></a
+        >
+      </div>
+    </section>
+    <section class="reference-card">
+      <h2>Take the next step locally</h2>
+      <p>
+        The playground accepts one standard-library source file. Test mode saves it as main_test.go.
+        Use a local module for multiple files, dependencies, interactive input, and network
+        services.
+      </p>
+      <pre class="inline-code"><code>go test -fuzz=FuzzHex -fuzztime=10s
+go test -run=^$ -bench=. -benchmem
+go test -cpuprofile=cpu.out
+go tool pprof cpu.out</code></pre>
+      <p>
+        Fuzz seeds run in the playground; generation and benchmarks are local commands. Drafts,
+        notes, and progress stay in this browser. Download code to keep an independent copy.
+      </p>
+      <p>
+        Version baseline: Go 1.27.4, verified 13 November 2026. The header reports the actual Docker
+        compiler when available.
+      </p>
+    </section>
+  </div>
+</div>
