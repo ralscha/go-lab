@@ -300,7 +300,7 @@ func main() {
     {
       id: 'capstone-service',
       title: 'Build a tested JSON endpoint',
-      summary: 'Enforce an HTTP contract around a small domain operation.',
+      summary: 'Enforce an HTTP contract with JSON v2 and explicit domain validation.',
       minutes: 18,
       objectives: [
         'Validate a request before responding',
@@ -311,7 +311,7 @@ func main() {
           title: 'Understand the model',
           body: [
             'An endpoint should enforce its method, bound its request body, decode the expected representation, reject trailing JSON, validate the domain values, and only then produce a success response. Each layer translates one contract into the next.',
-            'The example greets a validated name and returns JSON. httptest exercises the handler without a socket. Test the response code and decoded body, then add malformed JSON, unknown fields, empty names, and oversized body cases.',
+            'The example uses encoding/json/v2 to greet a validated name and return JSON. UnmarshalRead enforces one complete document, RejectUnknownMembers(true) rejects unexpected fields, and v2 rejects duplicate names by default. httptest exercises the handler without a socket. Test malformed JSON, duplicates, field case, trailing values, empty names, and oversized bodies as well as success.',
           ],
         },
         {
@@ -325,9 +325,8 @@ func main() {
       example: go`package main
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -345,26 +344,14 @@ func greet(w http.ResponseWriter, r *http.Request) {
 
 	}
 
-	var input struct{ Name string }
-
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
-
-	d.DisallowUnknownFields()
-
-	if err := d.Decode(&input); err != nil {
-
-		http.Error(w, "invalid JSON", 400)
-
-		return
-
+	var input struct {
+		Name string ${'`'}json:"name"${'`'}
 	}
 
-	if err := d.Decode(new(any)); err != io.EOF {
-
-		http.Error(w, "one value required", 400)
-
+	body := http.MaxBytesReader(w, r.Body, 1024)
+	if err := json.UnmarshalRead(body, &input, json.RejectUnknownMembers(true)); err != nil {
+		http.Error(w, "invalid JSON", 400)
 		return
-
 	}
 
 	name := strings.TrimSpace(input.Name)
@@ -377,16 +364,22 @@ func greet(w http.ResponseWriter, r *http.Request) {
 
 	}
 
+	output, err := json.Marshal(map[string]string{"greeting": "Hello, " + name})
+	if err != nil {
+		http.Error(w, "response encoding failed", 500)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-
-	_ = json.NewEncoder(w).Encode(map[string]string{"greeting": "Hello, " + name})
-
+	if _, err := w.Write(output); err != nil {
+		return // The response has started; do not attempt another status.
+	}
 }
 func main() {
 
 	response := httptest.NewRecorder()
 
-	greet(response, httptest.NewRequest("POST", "/greet", strings.NewReader("{\"Name\":\"Ada\"}")))
+	greet(response, httptest.NewRequest("POST", "/greet", strings.NewReader("{\"name\":\"Ada\"}")))
 
 	fmt.Println(response.Code)
 
@@ -485,15 +478,15 @@ func TestGreet(t *testing.T) {
 `,
       },
       quiz: {
-        question: 'Why decode again and require io.EOF?',
+        question: 'Why use UnmarshalRead for this bounded HTTP request body?',
         options: [
-          'To double the request size',
-          'To reject trailing JSON values',
-          'To enable network access',
+          'It automatically validates that the name is non-blank',
+          'It requires one JSON value and rejects trailing values',
+          'It sets the maximum body size automatically',
         ],
         answer: 1,
         explanation:
-          'A single Decode consumes only one value; a second check enforces the one-value contract.',
+          'UnmarshalRead checks the complete document through EOF. MaxBytesReader bounds the body, and explicit validation enforces the name requirement.',
       },
       references: [
         {
@@ -501,11 +494,11 @@ func TestGreet(t *testing.T) {
           url: 'https://pkg.go.dev/net/http',
         },
         {
-          label: 'encoding/json.Decoder',
-          url: 'https://pkg.go.dev/encoding/json#Decoder',
+          label: 'encoding/json/v2.UnmarshalRead',
+          url: 'https://pkg.go.dev/encoding/json/v2#UnmarshalRead',
         },
       ],
-      tags: ['capstone', 'API', 'HTTP', 'JSON'],
+      tags: ['capstone', 'API', 'HTTP', 'JSON', 'json/v2'],
     },
     {
       id: 'capstone-pipeline',

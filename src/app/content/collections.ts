@@ -116,7 +116,7 @@ func main() {
           title: 'Apply it carefully',
           body: [
             'Never rely on an exact capacity growth factor; it is an implementation choice. Use slices.Clone when independent element storage is needed. Cloning is shallow: nested slices, maps, or pointers still share their referenced data.',
-            'A nil slice has length zero and can be appended to. A non-nil empty slice also has length zero, but APIs such as JSON encoding can distinguish them.',
+            'A nil slice has length zero and can be appended to. A non-nil empty slice also has length zero, but APIs can distinguish them. For slices such as []int, encoding/json/v2 emits [] for both by default.',
           ],
         },
       ],

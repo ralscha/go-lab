@@ -4,6 +4,10 @@ An interactive Go course modeled on the sibling `rust-lab`: **Angular 22**, **Ty
 
 The baseline is **Go 1.27.4**, verified on **13 November 2026** against [Go downloads](https://go.dev/dl/). The runner image uses that exact release. `go.mod` declares the minimum required version; `.go-version` records the intended host toolchain. There are no third-party Go dependencies.
 
+## Online
+
+Access the course online at [https://go-lab.rasc.ch/](https://go-lab.rasc.ch/)
+
 ## Run locally
 
 Install Go 1.27.4, a Node version supported by `package.json` (Node 26 recommended), pnpm 12.18.0, and Docker with **Linux containers**. Start Docker, then:
@@ -49,7 +53,7 @@ For Linux installation and updates with systemd, Caddy, and Docker, see [deploym
 3. **Collections and text:** arrays, slices, maps, Unicode, and shared storage.
 4. **Types, interfaces, and errors:** pointers, structs, method sets, typed nil, and error wrapping.
 5. **Generics and iteration:** type parameters, constraints, collection helpers, and iterator functions.
-6. **Standard library:** streaming I/O, files, database/sql, JSON validation, and time.
+6. **Standard library:** streaming I/O, files, database/sql, JSON v2 examples, and time.
 7. **Concurrency:** goroutines, channels, cancellation, mutexes, atomics, and race detection.
 8. **Test and measure:** table tests, executable examples, fuzz properties, and benchmarks.
 9. **Build useful programs:** package boundaries, flags, HTTP handlers and lifecycle, structured logs, and profiling.

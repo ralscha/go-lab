@@ -5,7 +5,7 @@ export const stdlib: CourseModule = {
   id: 'stdlib',
   title: 'The standard library',
   level: 'Intermediate',
-  description: 'Readers, files, JSON, and time without external dependencies.',
+  description: 'Readers, files, JSON v2, and time without external dependencies.',
   lessons: [
     {
       id: 'readers-writers',
@@ -405,113 +405,194 @@ func main() {
     },
     {
       id: 'json',
-      title: 'JSON and validation',
-      summary: 'Separate decoding a representation from accepting its meaning.',
-      minutes: 18,
-      objectives: ['Use exported fields in JSON models', 'Validate decoded input'],
+      title: 'JSON v2 and validation',
+      summary: 'Encode, decode, and validate data with encoding/json/v2.',
+      minutes: 25,
+      objectives: [
+        'Encode and decode typed models with encoding/json/v2',
+        'Choose strict input rules and validate domain values',
+        'Choose JSON output options for your data model',
+      ],
       sections: [
         {
-          title: 'Understand the model',
+          title: 'Use the v2 standard-library API',
           body: [
-            'encoding/json maps JSON to Go values. Exported struct fields participate, and json tags can control their names. Unmarshal decodes a byte slice; Decoder reads from an io.Reader. Always check errors before trusting decoded values.',
-            'Decoding establishes a representation, not your domain rules. A successfully decoded age can still be negative. Use explicit validation after decoding, and decide whether missing fields need to be distinguished from zero values through pointers or a separate presence model.',
+            'Go 1.27 includes encoding/json/v2 and encoding/json/jsontext by default. This course uses Go 1.27.4, so no GOEXPERIMENT=jsonv2 setting or external module is needed. Import encoding/json/v2; its package name is still json.',
+            'Marshal and Unmarshal work with byte slices; MarshalWrite and UnmarshalRead write to an io.Writer or read from an io.Reader. Pass options directly to these functions. Exported struct fields participate, and json tags define their JSON names. Always check errors before using decoded data.',
           ],
         },
         {
-          title: 'Apply it carefully',
+          title: 'Choose strict input rules',
           body: [
-            'When decoding into any, JSON numbers normally become float64. Use Decoder.UseNumber when preserving numeric text matters. DisallowUnknownFields rejects unexpected object fields when decoding into structs.',
-            'Decoder.Decode reads one value. For an endpoint requiring exactly one JSON value, attempt another decode and require io.EOF. Bound request size before decoding. Avoid treating arbitrary input as trusted configuration.',
+            'V2 rejects duplicate object names and invalid UTF-8 by default. Field matching is case-sensitive: a field tagged json:"name" matches name, not Name. Unknown members are still ignored by default; add json.RejectUnknownMembers(true) to reject misspellings and unexpected fields.',
+            'Decoding does not enforce domain rules: a score can decode successfully and still be negative. Decode into a fresh value, check the error, then validate required fields and ranges. Use pointers when absence must differ from a zero value; distinguishing missing from explicit null needs a separate presence model.',
+            'When decoding into any, JSON numbers become float64, which can lose integer precision. Prefer concrete integer fields for exact IDs and counters. Exercise your model with representative inputs, including duplicates, field case, unknown members, nil collections, and zero values.',
+          ],
+        },
+        {
+          title: 'Read one document or a stream',
+          body: [
+            'UnmarshalRead requires exactly one JSON value and reads through EOF, allowing surrounding whitespace but rejecting trailing values or junk. Bound an HTTP body with http.MaxBytesReader before passing it to UnmarshalRead. An open-ended stream needs a different approach because waiting for EOF may block.',
+            'For a sequence of values, create a jsontext.Decoder and call json.UnmarshalDecode repeatedly until io.EOF. MarshalEncode similarly writes through a jsontext.Encoder. The jsontext package also exposes tokens and raw values for syntax-level work. MarshalWrite does not add a newline.',
+          ],
+        },
+        {
+          title: 'Choose the encoded output',
+          body: [
+            'V2 encodes a nil []string as [] and a nil map as {}. Use FormatNilSliceAsNull(true) or FormatNilMapAsNull(true) only when that is the intended contract. Map order is unspecified by default; json.Deterministic(true) makes output repeatable, but does not promise canonical JSON.',
+            'The v2 omitempty tag omits fields whose JSON representation is null, an empty string, array, or object. It does not omit false or 0. Use omitzero to omit Go zero values, including types with an IsZero method. Test these choices against the consumers of your JSON.',
           ],
         },
       ],
       example: go`package main
 
 import (
-	"encoding/json"
-	"fmt"
-)
-
-type Profile struct {
-	Name  string
-	Score int
-}
-
-func main() {
-
-	var p Profile
-
-	if err := json.Unmarshal([]byte("{\"name\":\"Ada\",\"score\":42}"), &p); err != nil {
-
-		panic(err)
-
-	}
-
-	fmt.Println(p.Name, p.Score)
-
-}
-`,
-      expectedOutput: 'Ada 42',
-      exercise: {
-        prompt: 'Reject an unexpected JSON field.',
-        hint: 'Enable DisallowUnknownFields before Decode.',
-        solution: go`package main
-
-import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 )
 
+type Profile struct {
+	Name  string   ${'`'}json:"name"${'`'}
+	Score int      ${'`'}json:"score"${'`'}
+	Tags  []string ${'`'}json:"tags"${'`'}
+}
+
 func main() {
+	var p Profile
+	input := strings.NewReader("{\"name\":\"Ada\",\"score\":42}")
+	if err := json.UnmarshalRead(input, &p, json.RejectUnknownMembers(true)); err != nil {
+		panic(err)
+	}
+	if strings.TrimSpace(p.Name) == "" || p.Score < 0 {
+		panic("name required and score must be non-negative")
+	}
+	fmt.Println(p.Name, p.Score)
 
-	var value struct{ Name string }
+	encoded, err := json.Marshal(p)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(string(encoded))
 
-	d := json.NewDecoder(strings.NewReader("{\"Name\":\"Ada\",\"extra\":1}"))
+	var duplicate Profile
+	err = json.Unmarshal([]byte("{\"name\":\"Ada\",\"name\":\"Grace\"}"), &duplicate)
+	fmt.Println("duplicate rejected:", err != nil)
+}
+`,
+      expectedOutput: 'Ada 42\n{"name":"Ada","score":42,"tags":[]}\nduplicate rejected: true',
+      exercise: {
+        prompt:
+          'Complete decodeName so it accepts exactly one JSON document with a non-blank name, rejects unknown members, and returns the trimmed name. Keep the v2 defaults for duplicate names and field matching.',
+        hint: 'Pass json.RejectUnknownMembers(true) to UnmarshalRead, return decoding errors, then trim and validate Name. UnmarshalRead already rejects a trailing value.',
+        solution: go`package main
 
-	d.DisallowUnknownFields()
+import (
+	"encoding/json/v2"
+	"fmt"
+	"strings"
+)
 
-	err := d.Decode(&value)
+func decodeName(input string) (string, error) {
+	var value struct {
+		Name string ${'`'}json:"name"${'`'}
+	}
+	if err := json.UnmarshalRead(strings.NewReader(input), &value, json.RejectUnknownMembers(true)); err != nil {
+		return "", err
+	}
+	name := strings.TrimSpace(value.Name)
+	if name == "" {
+		return "", fmt.Errorf("name required")
+	}
+	return name, nil
+}
 
-	fmt.Println(err != nil)
-
+func main() {
+	for _, input := range []string{
+		"{\"name\":\" Ada \"}",
+		"{\"name\":\"Ada\",\"extra\":1}",
+		"{\"Name\":\"Ada\"}",
+		"{\"name\":\"Ada\",\"name\":\"Grace\"}",
+		"{\"name\":\"Ada\"} {}",
+		"{\"name\":\" \"}",
+		"{}",
+	} {
+		name, err := decodeName(input)
+		if err != nil {
+			fmt.Println("rejected")
+		} else {
+			fmt.Println("accepted:", name)
+		}
+	}
 }
 `,
         starter: go`package main
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 )
 
+func decodeName(input string) (string, error) {
+	var value struct {
+		Name string ${'`'}json:"name"${'`'}
+	}
+	// TODO: reject unknown members.
+	if err := json.UnmarshalRead(strings.NewReader(input), &value); err != nil {
+		return "", err
+	}
+	// TODO: trim the name and reject a blank or missing name.
+	return value.Name, nil
+}
+
 func main() {
-
-	var value struct{ Name string }
-
-	d := json.NewDecoder(strings.NewReader("{\"Name\":\"Ada\",\"extra\":1}"))
-	/* TODO: reject unknown fields*/
-	err := d.Decode(&value)
-
-	fmt.Println(err != nil)
-
+	for _, input := range []string{
+		"{\"name\":\" Ada \"}",
+		"{\"name\":\"Ada\",\"extra\":1}",
+		"{\"Name\":\"Ada\"}",
+		"{\"name\":\"Ada\",\"name\":\"Grace\"}",
+		"{\"name\":\"Ada\"} {}",
+		"{\"name\":\" \"}",
+		"{}",
+	} {
+		name, err := decodeName(input)
+		if err != nil {
+			fmt.Println("rejected")
+		} else {
+			fmt.Println("accepted:", name)
+		}
+	}
 }
 `,
-        expectedOutput: 'true',
+        expectedOutput: 'accepted: Ada\nrejected\nrejected\nrejected\nrejected\nrejected\nrejected',
       },
       quiz: {
-        question: 'Does successful JSON decoding validate domain rules?',
-        options: ['Always', 'No', 'Only for exported fields'],
+        question: 'Which input rule needs an explicit option when decoding a struct with JSON v2?',
+        options: [
+          'Reject duplicate object names',
+          'Reject unknown object members',
+          'Reject invalid UTF-8',
+        ],
         answer: 1,
-        explanation: 'Decoding and semantic validation are separate steps.',
+        explanation:
+          'V2 rejects duplicate names and invalid UTF-8 by default. Unknown members require RejectUnknownMembers(true), and domain rules still need explicit validation.',
       },
       references: [
         {
-          label: 'encoding/json',
-          url: 'https://pkg.go.dev/encoding/json',
+          label: 'encoding/json/v2',
+          url: 'https://pkg.go.dev/encoding/json/v2',
+        },
+        {
+          label: 'encoding/json/jsontext',
+          url: 'https://pkg.go.dev/encoding/json/jsontext',
+        },
+        {
+          label: 'Go 1.27 release notes',
+          url: 'https://go.dev/doc/go1.27',
         },
       ],
-      tags: ['JSON', 'validation', 'encoding'],
+      tags: ['JSON', 'json/v2', 'jsontext', 'validation', 'encoding'],
     },
     {
       id: 'time',
