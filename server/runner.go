@@ -15,7 +15,7 @@ import (
 const outputLimit = 1 << 20
 const startupMarker = "GO_LAB_RUNNER_READY\n"
 
-type dockerRunner struct{ image string }
+type dockerRunner struct{ image, runtime string }
 type outputCapture struct {
 	mu             sync.Mutex
 	stdout, stderr bytes.Buffer
@@ -46,15 +46,18 @@ func (w outputWriter) Write(p []byte) (int, error) {
 	}
 	return count, nil
 }
-func dockerArgs(name, image, operation string, input request) []string {
-	return []string{"run", "--rm", "--pull=never", "--name", name, "--interactive",
+func dockerArgs(name, image, runtime, operation string, input request) []string {
+	args := []string{"run", "--rm", "--pull=never", "--name", name, "--interactive",
 		"--network=none", "--read-only", "--user=10001:10001", "--cap-drop=ALL",
 		"--security-opt=no-new-privileges", "--cpus=1", "--memory=768m", "--memory-swap=768m",
 		"--pids-limit=128", "--ulimit=nofile=256:256", "--ulimit=fsize=67108864:67108864",
 		"--ipc=none", "--log-driver=none",
 		"--tmpfs=/work:rw,exec,nosuid,nodev,size=268435456,mode=1777",
-		"--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=67108864,mode=1777",
-		image, operation, input.Mode, input.Optimization}
+		"--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=67108864,mode=1777"}
+	if runtime != "" {
+		args = append(args, "--runtime", runtime)
+	}
+	return append(args, image, operation, input.Mode, input.Optimization)
 }
 func (d *dockerRunner) run(ctx context.Context, operation string, input request) (result, error) {
 	start := time.Now()
@@ -62,7 +65,7 @@ func (d *dockerRunner) run(ctx context.Context, operation string, input request)
 	job, cancel := context.WithCancel(ctx)
 	defer cancel()
 	capture := &outputCapture{remaining: outputLimit, cancel: cancel}
-	cmd := exec.CommandContext(job, "docker", dockerArgs(name, d.image, operation, input)...)
+	cmd := exec.CommandContext(job, "docker", dockerArgs(name, d.image, d.runtime, operation, input)...)
 	cmd.Stdin = strings.NewReader(input.Code)
 	cmd.Stdout = outputWriter{capture: capture}
 	cmd.Stderr = outputWriter{capture: capture, stderr: true}
@@ -88,7 +91,7 @@ func (d *dockerRunner) run(ctx context.Context, operation string, input request)
 		return output, nil
 	}
 	if err != nil && !ready {
-		return result{}, errors.New("Go runner unavailable. Start Docker with Linux containers and run npm run runner:build")
+		return result{}, errors.New("Go runner unavailable. Start Docker with Linux containers, check the configured runtime, and run pnpm run runner:build")
 	}
 	if exit := new(exec.ExitError); errors.As(err, &exit) && exit.ExitCode() == 124 {
 		output.Stderr += "\nExecution exceeded the 30-second limit."

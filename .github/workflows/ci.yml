@@ -7,22 +7,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '26'
-          cache: npm
+          cache: pnpm
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false
-      - run: npm ci
-      - run: npm run format:check
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run format:check
       - run: go vet ./...
-      - run: npm test
-      - run: npm run build
-      - run: npm run runner:build
+      - run: pnpm test
+      - run: pnpm run build
+      - run: pnpm run runner:build
       - run: go test ./server -run TestDockerIntegration -v
         env:
           GO_LAB_DOCKER_TEST: '1'
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:ui
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm run test:ui

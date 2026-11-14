@@ -201,7 +201,7 @@ func TestOutputLimitAcrossStreams(t *testing.T) {
 	}
 }
 func TestDockerIsolationArguments(t *testing.T) {
-	args := strings.Join(dockerArgs("job", "image", "execute", request{Mode: "test", Optimization: "race"}), " ")
+	args := strings.Join(dockerArgs("job", "image", "", "execute", request{Mode: "test", Optimization: "race"}), " ")
 	for _, flag := range []string{"--network=none", "--read-only", "--user=10001:10001", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pull=never", "--pids-limit=128", "--log-driver=none"} {
 		if !strings.Contains(args, flag) {
 			t.Errorf("missing %s", flag)
@@ -214,6 +214,7 @@ func TestDockerIsolationArguments(t *testing.T) {
 
 func testApp(r runner, root string) *app {
 	a := newApp(r, root)
+	a.disabledFile = filepath.Join(root, "runner-disabled")
 	a.origins["http://example.com"] = true
 	return a
 }

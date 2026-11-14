@@ -31,7 +31,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	app := newApp(&dockerRunner{image: env("RUNNER_IMAGE", "go-lab-runner:1.27.4")}, root)
+	config, err := loadRunnerConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
+	app := newApp(&dockerRunner{image: env("RUNNER_IMAGE", "go-lab-runner:1.27.4"), runtime: config.runtime}, root)
+	app.config = config
 	server := &http.Server{
 		Addr: net.JoinHostPort(env("HOST", "127.0.0.1"), port), Handler: app,
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,

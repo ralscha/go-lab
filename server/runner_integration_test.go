@@ -12,7 +12,11 @@ func TestDockerIntegration(t *testing.T) {
 	if os.Getenv("GO_LAB_DOCKER_TEST") != "1" {
 		t.Skip("set GO_LAB_DOCKER_TEST=1 to test the built runner image")
 	}
-	runner := &dockerRunner{image: env("RUNNER_IMAGE", "go-lab-runner:1.27.4")}
+	config, err := loadRunnerConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &dockerRunner{image: env("RUNNER_IMAGE", "go-lab-runner:1.27.4"), runtime: config.runtime}
 	for _, tc := range []struct {
 		name, operation, mode, build, code, contains string
 		success                                      bool

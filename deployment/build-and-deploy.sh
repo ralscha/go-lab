@@ -10,7 +10,10 @@ readonly SERVICE_FILE=/etc/systemd/system/go-lab.service
 readonly CADDY_MAIN=/etc/caddy/Caddyfile
 readonly CADDY_SITE=/etc/caddy/sites/go-lab.caddy
 readonly CADDY_USERS=/etc/caddy/auth/go-lab.users
+readonly RUNNER_CONFIG=/etc/go-lab/runner-runtime.env
+readonly RUNNER_DISABLED_FILE=/etc/go-lab/runner-disabled
 readonly SITE=go-lab.rasc.ch
+PUBLIC_ACCESS="${PUBLIC_ACCESS:-false}"
 
 work_dir=
 previous_release=
@@ -99,6 +102,23 @@ check_caddy_users() {
   fi
 }
 
+check_gvisor() {
+  [[ -f "$RUNNER_CONFIG" ]] || die "Create $RUNNER_CONFIG with RUNNER_RUNTIME=runsc before enabling public access."
+  command -v runsc >/dev/null 2>&1 || die 'The gVisor runsc executable is not installed.'
+  runsc --version > "$work_dir/runsc-version.txt" || die 'Cannot run the gVisor runsc executable.'
+  grep -Eq '^runsc version ' "$work_dir/runsc-version.txt" || die 'runsc did not report a gVisor version.'
+  if [[ -e "$RUNNER_DISABLED_FILE" || -L "$RUNNER_DISABLED_FILE" ]]; then
+    die 'The runner is disabled; public access cannot be enabled.'
+  fi
+  docker_local info --format '{{json .Runtimes}}' > "$work_dir/docker-runtimes.json" || \
+    die 'Cannot read Docker runtime configuration.'
+  node - "$work_dir/docker-runtimes.json" <<'NODE' || die 'Docker does not report the runsc runtime.'
+const fs = require('node:fs');
+const runtimes = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (!Object.hasOwn(runtimes, 'runsc')) process.exit(1);
+NODE
+}
+
 caddy_has_site() {
   node - "$work_dir/caddy.json" "$SITE" <<'NODE'
 const fs = require('node:fs');
@@ -115,7 +135,11 @@ NODE
 [[ $(uname -s) == Linux ]] || die 'Run this script on the Linux deployment server.'
 [[ $EUID -eq 0 ]] || die 'Run this script as root (with the build tools available in PATH).'
 [[ -n "$REPO_URL" && -n "$BRANCH" ]] || die 'REPO_URL and BRANCH must not be empty.'
-for command_name in git node npm go docker systemctl systemd-analyze caddy curl \
+case "$PUBLIC_ACCESS" in
+  true|false) ;;
+  *) die 'PUBLIC_ACCESS must be true or false.' ;;
+esac
+for command_name in git node pnpm go docker systemctl systemd-analyze caddy curl \
   install flock mktemp readlink ln mv cp cat rm chmod find getent groupadd useradd id basename date sleep \
   grep runuser; do
   command -v "$command_name" >/dev/null 2>&1 || die "Missing required command: $command_name"
@@ -146,7 +170,11 @@ getent group docker >/dev/null || die 'The Docker installation must provide the 
 for config_file in "$SERVICE_FILE" "$CADDY_MAIN" "$CADDY_SITE"; do
   [[ ! -L "$config_file" || -e "$config_file" ]] || die "$config_file is a broken symlink."
 done
-check_caddy_users
+if [[ "$PUBLIC_ACCESS" == true ]]; then
+  check_gvisor
+else
+  check_caddy_users
+fi
 
 if [[ -s "$CADDY_MAIN" ]]; then
   caddy adapt --config "$CADDY_MAIN" --adapter caddyfile > "$work_dir/caddy.json"
@@ -166,8 +194,11 @@ runner_image="go-lab-runner:$(basename "$release_dir")"
 log 'Building the frontend and backend'
 (
   cd "$source_dir"
-  CI=true npm ci --include=dev --engine-strict
-  npm run build:client
+  expected_pnpm=$(node -p "require('./package.json').packageManager")
+  actual_pnpm="pnpm@$(pnpm --version)"
+  [[ "$actual_pnpm" == "$expected_pnpm" ]] || die "Expected $expected_pnpm, but found $actual_pnpm."
+  CI=true pnpm install --frozen-lockfile --config.engine-strict=true
+  pnpm run build:client
   GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off CGO_ENABLED=0 \
     GOCACHE="$APP_ROOT/cache/go-build" go build -trimpath -o "$work_dir/go-lab-server" ./server
 )
@@ -184,7 +215,8 @@ install -m 0755 "$work_dir/go-lab-server" "$release_dir/bin/go-lab-server"
 cp -R -- "$source_dir/dist/go-lab/browser/." "$release_dir/frontend/"
 find "$release_dir/frontend" -type d -exec chmod 0755 {} +
 find "$release_dir/frontend" -type f -exec chmod 0644 {} +
-printf 'RUNNER_IMAGE=%s\n' "$runner_image" > "$release_dir/runner.env"
+# Loaded after the administrator's optional settings, on every service start.
+printf 'RUNNER_IMAGE=%s\nRUNNER_REQUIRE_GVISOR=%s\n' "$runner_image" "$PUBLIC_ACCESS" > "$release_dir/runner.env"
 git -C "$source_dir" rev-parse HEAD > "$release_dir/REVISION"
 
 if ! getent group go-lab >/dev/null; then
@@ -201,7 +233,11 @@ backup_file "$CADDY_MAIN" caddy-main.previous
 backup_file "$CADDY_SITE" caddy-site.previous
 activation_started=true
 install -d -m 0755 /etc/caddy/sites
-install_config "$source_dir/deployment/Caddyfile" "$CADDY_SITE"
+if [[ "$PUBLIC_ACCESS" == true ]]; then
+  install_config "$source_dir/deployment/Caddyfile.public" "$CADDY_SITE"
+else
+  install_config "$source_dir/deployment/Caddyfile" "$CADDY_SITE"
+fi
 if [[ ! -e "$CADDY_MAIN" ]]; then
   install -m 0644 /dev/null "$CADDY_MAIN"
 fi
@@ -215,6 +251,11 @@ else
 fi
 caddy validate --config "$CADDY_MAIN" --adapter caddyfile
 
+# Apply authentication before a backend that may use Docker's default runtime starts.
+if [[ "$PUBLIC_ACCESS" == false && "$caddy_was_running" == true ]]; then
+  systemctl reload caddy.service
+fi
+
 log 'Activating the new release'
 systemctl stop "$SERVICE" 2>/dev/null || [[ "$service_was_running" == false ]]
 switch_release "$release_dir"
@@ -227,20 +268,29 @@ systemctl start "$SERVICE"
 ready=false
 for ((attempt = 1; attempt <= 30; attempt++)); do
   if systemctl is-active --quiet "$SERVICE" && \
-    curl --fail --silent --max-time 2 http://127.0.0.1:3002/api/health > /dev/null; then
+    curl --fail --silent --max-time 2 http://127.0.0.1:3002/api/health > "$work_dir/health.json"; then
     ready=true
     break
   fi
   sleep 1
 done
 [[ "$ready" == true ]] || die 'Backend did not become healthy. Check journalctl -u go-lab.service.'
+# Use the running process's settings; systemd handles quoting and duplicate assignments.
+runner_smoke_enabled=$(node "$source_dir/deployment/check-runner-health.mjs" "$PUBLIC_ACCESS" "$work_dir/health.json")
+case "$runner_smoke_enabled" in
+  true) ;;
+  false) [[ "$PUBLIC_ACCESS" == false ]] || die 'Public access requires runner smoke tests.' ;;
+  *) die 'Runner health check returned an invalid smoke-test decision.' ;;
+esac
+
 curl --fail --silent --show-error --max-time 5 http://127.0.0.1:3002/ > "$work_dir/index.html"
 [[ -s "$work_dir/index.html" ]] || die 'The frontend response is empty.'
 curl --fail --silent --show-error --max-time 5 \
   -H "Host: $SITE" -H "Origin: https://$SITE" \
   http://127.0.0.1:3002/api/health > /dev/null
-curl --fail --silent --show-error --max-time 45 http://127.0.0.1:3002/api/version > "$work_dir/version.json"
-node - "$work_dir/version.json" <<'NODE'
+if [[ "$runner_smoke_enabled" == true ]]; then
+  curl --fail --silent --show-error --max-time 45 http://127.0.0.1:3002/api/version > "$work_dir/version.json"
+  node - "$work_dir/version.json" <<'NODE'
 const fs = require('node:fs');
 const version = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 if (typeof version.version !== 'string' || version.version !== version.referenceVersion) {
@@ -248,11 +298,11 @@ if (typeof version.version !== 'string' || version.version !== version.reference
   process.exit(1);
 }
 NODE
-curl --fail --silent --show-error --max-time 50 \
-  -H 'Content-Type: application/json' \
-  --data '{"code":"package main\nimport \"fmt\"\nfunc main(){fmt.Println(\"deployment ok\")}\n","mode":"run","optimization":"default"}' \
-  http://127.0.0.1:3002/api/execute > "$work_dir/execute.json"
-node - "$work_dir/execute.json" <<'NODE'
+  curl --fail --silent --show-error --max-time 50 \
+    -H 'Content-Type: application/json' \
+    --data '{"code":"package main\nimport \"fmt\"\nfunc main(){fmt.Println(\"deployment ok\")}\n","mode":"run","optimization":"default"}' \
+    http://127.0.0.1:3002/api/execute > "$work_dir/execute.json"
+  node - "$work_dir/execute.json" <<'NODE'
 const fs = require('node:fs');
 const result = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 if (result.success !== true || result.stdout.trim() !== 'deployment ok') {
@@ -260,9 +310,14 @@ if (result.success !== true || result.stdout.trim() !== 'deployment ok') {
   process.exit(1);
 }
 NODE
+else
+  log 'Runner is disabled; skipping runner smoke tests.'
+fi
 
 if [[ "$caddy_was_running" == true ]]; then
-  systemctl reload caddy.service
+  if [[ "$PUBLIC_ACCESS" == true ]]; then
+    systemctl reload caddy.service
+  fi
 else
   caddy_start_attempted=true
   systemctl enable --now caddy.service

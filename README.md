@@ -6,12 +6,12 @@ The baseline is **Go 1.27.4**, verified on **13 November 2026** against [Go down
 
 ## Run locally
 
-Install Go 1.27.4, a Node version supported by `package.json` (Node 26 recommended), npm, and Docker with **Linux containers**. Start Docker, then:
+Install Go 1.27.4, a Node version supported by `package.json` (Node 26 recommended), pnpm 12.18.0, and Docker with **Linux containers**. Start Docker, then:
 
 ```sh
-npm ci
-npm run runner:build
-npm start
+pnpm install --frozen-lockfile
+pnpm run runner:build
+pnpm start
 ```
 
 Open **http://127.0.0.1:4201**. Angular proxies `/api` to the Go backend at **127.0.0.1:3002**. These ports differ from `rust-lab`, so both applications can run together. Ctrl+C stops both development processes. Angular reloads frontend changes; restart after backend changes.
@@ -21,15 +21,15 @@ The initial image build downloads Go and warms normal and race-enabled standard-
 For a production build served locally:
 
 ```sh
-npm run build
-npm run serve
+pnpm run build
+pnpm run serve
 ```
 
 Open **http://127.0.0.1:3002**. `build` creates `dist/go-lab/browser` and `bin/server` (`bin/server.exe` on Windows). The compiled binary can be launched directly from the repository root. Do not run development and production servers on port 3002 simultaneously.
 
 ## Server deployment
 
-For Linux installation and updates with systemd, Caddy, and Docker, see [deployment/README.md](deployment/README.md). The provided configuration targets `go-lab.rasc.ch`.
+For Linux installation and updates with systemd, Caddy, and Docker, see [deployment/README.md](deployment/README.md). The provided configuration targets `go-lab.rasc.ch`, uses Basic Auth by default, and requires gVisor for opt-in public access.
 
 ## Learn and experiment
 
@@ -76,38 +76,46 @@ The runner supports a single file using the standard library. Test mode places t
 
 Each job runs as UID/GID 10001 with no network, no Linux capabilities, no host mounts, a read-only root filesystem, and `no-new-privileges`. It receives one CPU, 768 MiB RAM, 128 processes/threads, a 256 MiB executable work tmpfs, and a 64 MiB non-executable temporary tmpfs. Source arrives over stdin. Jobs have a 30-second internal deadline, a 35-second backend deadline, and a combined 1 MiB output limit. The backend removes containers on completion, cancellation, and overflow, holding its admission slot through cleanup.
 
-The API accepts at most four simultaneous jobs, 30 requests per client IP per minute, 64 KiB JSON bodies, and 48 KiB source. Host and browser-origin checks protect the local API. Proxy-supplied client IP headers are ignored unless `TRUST_FORWARDED_FOR=true`; then only the rightmost `X-Forwarded-For` entry from a loopback proxy is used. Containers share a kernel. Keep this local learning runner behind a trusted boundary; public multi-user execution needs a separately designed sandbox and access controls.
+The API accepts at most four simultaneous jobs, one active job per client IP, and 120 jobs per rolling hour across all clients. It also limits clients to 30 requests per minute, JSON bodies to 64 KiB, and source to 48 KiB. Health checks and cached compiler metadata do not consume job quota; the in-memory limits reset when the backend restarts. Host and browser-origin checks protect the API. Proxy-supplied client IP headers are ignored unless `TRUST_FORWARDED_FOR=true`; then only the rightmost `X-Forwarded-For` entry from a loopback proxy is used.
 
-| Endpoint            | Contract                                                                                                                      |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/health`   | Backend health and limits; does not probe Docker.                                                                             |
-| `GET /api/version`  | Actual Docker compiler version.                                                                                               |
-| `POST /api/execute` | JSON `{ "code": "...", "mode": "run", "optimization": "default" }`. Mode: `run` or `test`; optimization: `default` or `race`. |
-| `POST /api/format`  | JSON `{ "code": "..." }`; preserves submitted source on failure.                                                              |
+Set `RUNNER_RUNTIME=runsc` after installing and registering gVisor with Docker. An unavailable runtime fails the job without falling back to Docker's default runtime. Public deployments persist `RUNNER_REQUIRE_GVISOR=true` and refuse to start unless the runtime is `runsc`, even if runner work is disabled. Docker daemon access remains effectively host-administrator access; use a dedicated host or VM and appropriate upstream controls for public execution.
+
+Create `/etc/go-lab/runner-disabled` to block new runner jobs immediately, or set `RUNNER_ENABLED=false` before starting the backend. Static pages and health checks remain available; execute, format, and version requests return HTTP 503. Remove the marker to re-enable jobs when `RUNNER_ENABLED=true`. A job already running may finish.
+
+| Endpoint            | Contract                                                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /api/health`   | Backend health, limits, and effective `runnerEnabled`, `runnerRuntime` (`"runsc"` or `null`), and `runnerRequiresGvisor`; does not probe Docker. |
+| `GET /api/version`  | Actual Docker compiler version, cached for five minutes.                                                                                         |
+| `POST /api/execute` | JSON `{ "code": "...", "mode": "run", "optimization": "default" }`. Mode: `run` or `test`; optimization: `default` or `race`.                    |
+| `POST /api/format`  | JSON `{ "code": "..." }`; preserves submitted source on failure.                                                                                 |
 
 Execution returns `success`, `stdout`, `stderr`, and `elapsedMs`. Compiler/runtime failures return HTTP 200 with `success: false`; invalid requests and unavailable infrastructure return HTTP errors with an `error` message. Unknown request fields are rejected.
 
-| Environment variable | Default                                                  |
-| -------------------- | -------------------------------------------------------- |
-| `HOST`               | `127.0.0.1`                                              |
-| `PORT`               | `3002`                                                   |
-| `STATIC_ROOT`        | `dist/go-lab/browser`, relative to the working directory |
-| `RUNNER_IMAGE`       | `go-lab-runner:1.27.4`                                   |
-| `ALLOWED_ORIGINS`    | `http://localhost:4201,http://127.0.0.1:4201`            |
+| Environment variable    | Default                                                      |
+| ----------------------- | ------------------------------------------------------------ |
+| `HOST`                  | `127.0.0.1`                                                  |
+| `PORT`                  | `3002`                                                       |
+| `STATIC_ROOT`           | `dist/go-lab/browser`, relative to the working directory     |
+| `RUNNER_IMAGE`          | `go-lab-runner:1.27.4`                                       |
+| `RUNNER_RUNTIME`        | unset; Docker default, or `runsc` for gVisor                 |
+| `RUNNER_REQUIRE_GVISOR` | `false`; `true` requires `RUNNER_RUNTIME=runsc` at startup   |
+| `RUNNER_ENABLED`        | `true`; `false` disables runner work at startup              |
+| `TRUST_FORWARDED_FOR`   | `false`; trust the rightmost forwarded IP from loopback only |
+| `ALLOWED_ORIGINS`       | `http://localhost:4201,http://127.0.0.1:4201`                |
 
 For a trusted reverse proxy, set `ALLOWED_ORIGINS` to the exact external origins (including non-default ports); their hosts are also admitted by the Host check. This replaces the development origin list. Image overrides must be trusted images implementing `runner/run.sh`’s protocol and isolation assumptions.
 
 ## Verification
 
 ```sh
-npm test
+pnpm test
 go vet ./...
-npm run format:check
-npm run build
-npm run test:ui
+pnpm run format:check
+pnpm run build
+pnpm run test:ui
 ```
 
-`npm test` runs backend tests and compiles/runs all **88 curated examples and solutions** with the host Go toolchain. This developer-only checker runs repository-authored code; it never accepts browser submissions. Artifacts stay in ignored `.artifacts/` directories.
+`pnpm test` runs backend and deployment-policy tests, then compiles/runs all **88 curated examples and solutions** with the host Go toolchain. This developer-only checker runs repository-authored code; it never accepts browser submissions. Artifacts stay in ignored `.artifacts/` directories.
 
 Docker integration checks are opt-in:
 
@@ -117,9 +125,9 @@ go test ./server -run TestDockerIntegration -v
 Remove-Item Env:GO_LAB_DOCKER_TEST
 ```
 
-On POSIX shells use `GO_LAB_DOCKER_TEST=1 go test ./server -run TestDockerIntegration -v`. The suite checks execution, tests, formatting, race mode, errors, non-root/read-only operation, cancellation, and output limits.
+On POSIX shells use `GO_LAB_DOCKER_TEST=1 go test ./server -run TestDockerIntegration -v`. The suite checks execution, tests, formatting, race mode, errors, non-root/read-only operation, cancellation, and output limits. Set `RUNNER_RUNTIME=runsc` as well to exercise the same suite under gVisor on a configured Linux host.
 
-UI tests use installed Microsoft Edge on Windows. On Linux/macOS, first run `npx playwright install chromium`. Build the frontend and runner before UI tests. Playwright starts and stops its own backend; port 3002 must be free. Screenshots go to `.artifacts/` and failure traces to `test-results/`.
+UI tests use installed Microsoft Edge on Windows. On Linux/macOS, first run `pnpm exec playwright install chromium`. Build the frontend and runner before UI tests. Playwright starts and stops its own backend; port 3002 must be free. Screenshots go to `.artifacts/` and failure traces to `test-results/`.
 
 ## Source layout
 

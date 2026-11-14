@@ -39,18 +39,26 @@ type rate struct {
 	count int
 }
 type app struct {
-	runner  runner
-	root    string
-	slots   chan struct{}
-	mu      sync.Mutex
-	rates   map[string]rate
-	origins map[string]bool
+	runner         runner
+	root           string
+	slots          chan struct{}
+	mu             sync.Mutex
+	rates          map[string]rate
+	origins        map[string]bool
+	config         runnerConfig
+	disabledFile   string
+	activeIPs      map[string]bool
+	jobStarts      []time.Time
+	versionMu      sync.Mutex
+	version        string
+	versionExpires time.Time
 	// trustForwarded uses X-Forwarded-For from a loopback reverse proxy such as Caddy.
 	trustForwarded bool
 }
 
 func newApp(r runner, root string) *app {
 	a := &app{runner: r, root: root, slots: make(chan struct{}, 4), rates: map[string]rate{}, origins: map[string]bool{},
+		config: runnerConfig{enabled: true}, disabledFile: "/etc/go-lab/runner-disabled", activeIPs: map[string]bool{},
 		trustForwarded: env("TRUST_FORWARDED_FOR", "false") == "true"}
 	for origin := range strings.SplitSeq(env("ALLOWED_ORIGINS", "http://localhost:4201,http://127.0.0.1:4201"), ",") {
 		a.origins[strings.TrimSpace(origin)] = true
@@ -101,6 +109,9 @@ func (a *app) clientAddress(r *http.Request) string {
 	address, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		address = r.RemoteAddr
+	}
+	if ip := net.ParseIP(address); ip != nil {
+		address = ip.String()
 	}
 	if ip := net.ParseIP(address); !a.trustForwarded || ip == nil || !ip.IsLoopback() {
 		return address
@@ -189,7 +200,17 @@ func (a *app) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/api/health" && r.Method == http.MethodGet {
-		respond(w, 200, map[string]any{"status": "ok", "provider": "Local Docker", "referenceVersion": "1.27.4", "maxSourceBytes": maxSource})
+		enabled, err := a.runnerEnabled()
+		if err != nil {
+			fail(w, 503, "cannot check the runner disable switch")
+			return
+		}
+		var runtime any
+		if a.config.runtime != "" {
+			runtime = a.config.runtime
+		}
+		respond(w, 200, map[string]any{"status": "ok", "provider": "Local Docker", "referenceVersion": "1.27.4", "maxSourceBytes": maxSource,
+			"runnerEnabled": enabled, "runnerRuntime": runtime, "runnerRequiresGvisor": a.config.requireGvisor})
 		return
 	}
 	operation := strings.TrimPrefix(r.URL.Path, "/api/")
@@ -224,13 +245,26 @@ func (a *app) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, 429, "too many requests; try again in a minute")
 		return
 	}
-	select {
-	case a.slots <- struct{}{}:
-		defer func() { <-a.slots }()
-	default:
-		fail(w, 503, "runner busy; try again shortly")
+	if !a.ensureRunnerEnabled(w) {
 		return
 	}
+	if operation == "version" {
+		a.versionMu.Lock()
+		defer a.versionMu.Unlock()
+		// Recheck after waiting for another metadata request.
+		if !a.ensureRunnerEnabled(w) {
+			return
+		}
+		if time.Now().Before(a.versionExpires) {
+			a.respondVersion(w)
+			return
+		}
+	}
+	release, ok := a.admit(w, a.clientAddress(r))
+	if !ok {
+		return
+	}
+	defer release()
 	ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
 	defer cancel()
 	output, err := a.runner.run(ctx, operation, input)
@@ -248,7 +282,9 @@ func (a *app) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fail(w, 503, "invalid compiler metadata")
 			return
 		}
-		respond(w, 200, map[string]string{"version": strings.TrimPrefix(fields[2], "go"), "provider": "Local Docker", "referenceVersion": "1.27.4"})
+		a.version = strings.TrimPrefix(fields[2], "go")
+		a.versionExpires = time.Now().Add(5 * time.Minute)
+		a.respondVersion(w)
 		return
 	}
 	if operation == "format" {
@@ -258,6 +294,9 @@ func (a *app) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	respond(w, 200, output)
+}
+func (a *app) respondVersion(w http.ResponseWriter) {
+	respond(w, 200, map[string]string{"version": a.version, "provider": "Local Docker", "referenceVersion": "1.27.4"})
 }
 func (a *app) static(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
