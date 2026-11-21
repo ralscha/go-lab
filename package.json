@@ -2,7 +2,7 @@
   "name": "go-lab",
   "version": "1.0.0",
   "private": true,
-  "packageManager": "pnpm@12.18.0",
+  "packageManager": "pnpm@12.21.0",
   "type": "module",
   "scripts": {
     "start": "node scripts/dev.mjs",
@@ -38,6 +38,7 @@
   "devDependencies": {
     "@angular/build": "22.3.0",
     "@angular/cli": "22.3.0",
+    "@angular/compiler-cli": "22.3.0",
     "@playwright/test": "1.65.1",
     "prettier": "3.10.1",
     "typescript": "6.0.3"

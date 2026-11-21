@@ -10,7 +10,7 @@ Access the course online at [https://go-lab.rasc.ch/](https://go-lab.rasc.ch/)
 
 ## Run locally
 
-Install Go 1.27.4, a Node version supported by `package.json` (Node 26 recommended), pnpm 12.18.0, and Docker with **Linux containers**. Start Docker, then:
+Install Go 1.27.4, a Node version supported by `package.json` (Node 26 recommended), pnpm 12.21.0, and Docker with **Linux containers**. Start Docker, then:
 
 ```sh
 pnpm install --frozen-lockfile

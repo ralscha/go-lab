@@ -15,7 +15,7 @@ This installs `git@github.com:ralscha/go-lab.git`, branch `main`, at **https://g
 Use a Linux server with systemd and these tools in the **root shell's PATH**:
 
 - Git, curl, and standard GNU/Linux utilities including `flock`.
-- A Node.js version supported by `package.json`, pnpm 12.18.0, and Go 1.27.4 or newer.
+- A Node.js version supported by `package.json`, pnpm 12.21.0, and Go 1.27.4 or newer.
 - Docker Engine with an active `docker.service`, the `docker` group, and `/var/run/docker.sock`.
 - Caddy 2.8 or newer with `caddy.service` and the `caddy` CLI.
 - SSH access to `git@github.com:ralscha/go-lab.git` from the account running the script. Configure its SSH key and GitHub host key first.
@@ -78,7 +78,7 @@ First commit and push the deployment files to the selected branch: the script in
 bash ./build-and-deploy.sh
 ```
 
-The script clones the selected branch, checks for pnpm 12.18.0, runs `pnpm install --frozen-lockfile`, builds the frontend and Go backend, and builds a release-specific Docker runner image. It stages the release under `/opt/go-lab`, installs a system user and unit, and adds the selected Caddy template without replacing existing sites. It then switches the release, verifies the frontend and health endpoint, checks the expected Go compiler version and a small execution when the runner is enabled, and reloads or starts Caddy as needed.
+The script clones the selected branch, checks for pnpm 12.21.0, runs `pnpm install --frozen-lockfile`, builds the frontend and Go backend, and builds a release-specific Docker runner image. It stages the release under `/opt/go-lab`, installs a system user and unit, and adds the selected Caddy template without replacing existing sites. It then switches the release, verifies the frontend and health endpoint, checks the expected Go compiler version and a small execution when the runner is enabled, and reloads or starts Caddy as needed.
 
 If `go-lab.rasc.ch` is already configured elsewhere in Caddy, move that site to `/etc/caddy/sites/go-lab.caddy` before the first deployment. The script manages that file and reuses an existing import that includes it. Validate any other Caddy changes before deploying. Avoid simultaneous go-lab and rust-lab deployments because they both update the Caddy configuration.
 
